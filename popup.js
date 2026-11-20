@@ -144,6 +144,7 @@ function updateSummary() {
   $('send').textContent = n ? `${n}개 NotebookLM으로 보내기` : '선택한 항목 NotebookLM으로 보내기';
   $('all').checked = items.length > 0 && n === items.length;
   $('send').disabled = n === 0;
+  $('copy').disabled = n === 0;
 }
 
 // ---------- 페이지 안에서 실행되는 추출 함수 (직렬화되어 주입: 외부 변수 참조 금지) ----------
@@ -290,6 +291,28 @@ $('all').addEventListener('change', () => {
   items.forEach((i) => { i.checked = $('all').checked; });
   render();
   persist();
+});
+// 선택한 항목의 URL을 한 줄씩 클립보드에 복사
+$('copy').addEventListener('click', async () => {
+  const text = items.filter((i) => i.checked).map((i) => i.url).join('\n');
+  if (!text) return;
+  const n = text.split('\n').length;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    // 권한 문제 대비: 임시 입력칸으로 복사
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    if (!ok) return showError('복사하지 못했어요', '잠시 뒤 다시 눌러 주세요.');
+  }
+  setStatus(`URL ${n}개를 복사했어요. 원하는 곳에 붙여넣기(Ctrl+V) 하세요.`);
+  const b = $('copy');
+  b.textContent = '복사됨 ✓';
+  setTimeout(() => { b.textContent = '복사'; }, 1500);
 });
 $('clear').addEventListener('click', () => { items = []; render(); persist(); setStatus('목록을 비웠어요.'); });
 document.querySelectorAll('#limits button').forEach((b) => {

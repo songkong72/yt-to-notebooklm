@@ -63,8 +63,8 @@
 
   .bar { flex: none; display: flex; align-items: center; gap: 8px; margin: 12px 0 6px; color: var(--sub); font-size: 12px; }
   .bar label { display: flex; align-items: center; gap: 6px; flex: 1; cursor: pointer; }
-  #clear { padding: 3px 10px; border-radius: 8px; background: var(--field); color: var(--sub); border: 1px solid var(--line); font-size: 12px; }
-  #clear:hover { background: var(--field-hover); }
+  #clear, #copy { padding: 3px 10px; border-radius: 8px; background: var(--field); color: var(--sub); border: 1px solid var(--line); font-size: 12px; }
+  #clear:hover:not(:disabled), #copy:hover:not(:disabled) { background: var(--field-hover); }
   input[type=checkbox] { accent-color: var(--blue); width: 14px; height: 14px; margin: 0; flex: none; }
 
   #list { flex: 1; min-height: 60px; overflow-y: auto; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 10px; }
@@ -131,6 +131,7 @@
     <div class="bar">
       <label><input type="checkbox" id="all" checked> 전체 선택</label>
       <span id="count">0 / 0</span>
+      <button id="copy" type="button" disabled title="선택한 항목의 URL을 한 줄씩 복사해요">복사</button>
       <button id="clear">비우기</button>
     </div>
     <div id="list"><div id="empty">목록이 비어 있습니다.</div></div>
