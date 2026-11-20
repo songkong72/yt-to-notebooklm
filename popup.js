@@ -1,11 +1,79 @@
 const $ = (id) => document.getElementById(id);
-const setStatus = (t) => { $('status').textContent = t; };
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
 
 let items = []; // { key, url, title, checked }
+// 소스 한도: 노트북 하나에 넣을 수 있는 소스 수 (무료 50 / Plus 100 / Pro 300). 구글이 바꾸면 여기만 고치면 됨
+const LIMITS = [50, 100, 300];
+const DEFAULT_LIMIT = 50;
+let limit = DEFAULT_LIMIT;
+
+// ---------- 메시지 자리 (안내 / 진행 / 오류) ----------
+const msgBox = () => { const b = $('msg'); b.textContent = ''; return b; };
+
+// 보통 안내 문구
+function setStatus(t) {
+  msgBox().appendChild(el('div', 'msg info plain', t));
+}
+
+// 진행 표시: 돌아가는 표시 + 막대
+function showProgress(text) {
+  const d = el('div', 'msg info');
+  const head = el('div', 'head');
+  const t = el('span', null, text);
+  t.id = 'progText';
+  head.append(el('span', 'spin'), t);
+  const track = el('div', 'ptrack');
+  track.appendChild(el('div', 'pfill'));
+  d.append(head, track, el('p', 'sub', '창을 닫지 말고 잠시만 기다려 주세요.'));
+  msgBox().appendChild(d);
+}
+function setProgressText(t) {
+  const e = $('progText');
+  if (e) e.textContent = t;
+}
+
+// 쉬운 말 오류 + 접어 둔 자세한 내용
+function showError(title, body, detail) {
+  const d = el('div', 'msg error');
+  d.append(el('div', 'head', title), el('p', 'sub', body));
+  if (detail) {
+    const more = el('button', 'more', '자세히 보기 ▾');
+    more.type = 'button';
+    more.setAttribute('aria-expanded', 'false');
+    const det = el('div', 'detail', detail);
+    det.hidden = true;
+    more.addEventListener('click', () => {
+      det.hidden = !det.hidden;
+      more.textContent = det.hidden ? '자세히 보기 ▾' : '접기 ▴';
+      more.setAttribute('aria-expanded', String(!det.hidden));
+    });
+    d.append(more, det);
+  }
+  msgBox().appendChild(d);
+}
+
+// 페이지에서 찾은 영상 개수를 실시간으로 받아 표시
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.loadProgress && typeof changes.loadProgress.newValue === 'number') {
+    setProgressText(`영상을 찾는 중이에요… 지금 ${changes.loadProgress.newValue}개`);
+  }
+});
 
 // ---------- 저장/복원 (팝업은 포커스를 잃으면 닫히므로 목록을 보존) ----------
 async function persist() {
-  await chrome.storage.local.set({ popupItems: items, sourceLimit: Number($('limit').value) || 300 });
+  await chrome.storage.local.set({ popupItems: items, limitChoice: limit });
+}
+
+// ---------- 소스 한도 버튼 ----------
+function renderLimit() {
+  document.querySelectorAll('#limits button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.v) === limit));
+  });
 }
 
 // ---------- URL 정규화 ----------
@@ -81,17 +149,21 @@ function updateSummary() {
 // ---------- 페이지 안에서 실행되는 추출 함수 (직렬화되어 주입: 외부 변수 참조 금지) ----------
 async function extractInPage() {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // 팝업에 "지금 N개"를 알리기 위한 진행 보고 (실패해도 추출에는 영향 없음)
+  const report = (n) => { try { chrome.storage.local.set({ loadProgress: n }); } catch (_) {} };
   // 구 레이아웃(ytd-playlist-video-renderer)과 신 레이아웃(yt-lockup-view-model) 모두 지원
   const ITEM = 'ytd-playlist-video-renderer, yt-lockup-view-model';
   const LINK = 'ytd-playlist-video-renderer a#video-title, yt-lockup-view-model a[href*="/watch?v="]';
   const rootOf = () => document.querySelector('ytd-browse[page-subtype="playlist"]') || document;
 
   for (let w = 0; w < 50 && !rootOf().querySelector(ITEM); w++) await sleep(200);
+  report(rootOf().querySelectorAll(ITEM).length);
   let last = -1, stable = 0;
   for (let i = 0; i < 100; i++) {
     window.scrollTo(0, document.documentElement.scrollHeight);
     await sleep(800);
     const n = rootOf().querySelectorAll(ITEM).length;
+    report(n);
     stable = n === last ? stable + 1 : 0;
     if (stable >= 2) break;
     last = n;
@@ -125,19 +197,20 @@ async function extractInPage() {
 // ---------- 현재 페이지에서 불러오기 ----------
 $('load').addEventListener('click', async () => {
   $('load').disabled = true;
+  $('loadLabel').textContent = '불러오는 중…';
   try {
     let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     let u = null;
     try { u = new URL(tab.url); } catch (_) {}
     if (!u || u.hostname !== 'www.youtube.com') {
-      setStatus('유튜브 페이지가 아닙니다. 아래에 URL을 직접 입력할 수 있습니다.');
+      showError('유튜브 페이지가 아니에요', '유튜브 재생목록이나 영상 페이지를 연 뒤 눌러 주세요. 아래에 URL을 직접 입력할 수도 있어요.');
       return;
     }
     const list = u.searchParams.get('list');
 
     // 재생 페이지(list= 포함)면 재생목록 페이지로 이동 후 진행
     if (u.pathname === '/watch' && list) {
-      setStatus('재생목록 페이지로 이동 중...');
+      showProgress('재생목록 페이지로 이동하는 중이에요…');
       await chrome.tabs.update(tab.id, { url: `https://www.youtube.com/playlist?list=${encodeURIComponent(list)}` });
       await new Promise((resolve) => {
         const onUpdated = (id, info) => {
@@ -155,31 +228,38 @@ $('load').addEventListener('click', async () => {
       const n = normalizeUrl(tab.url);
       const title = (tab.title || '').replace(/^\(\d+\)\s*/, '').replace(/ - YouTube$/, '').trim();
       const added = addItems([{ ...n, title }]);
-      setStatus(added ? `현재 영상 1개를 목록에 추가했습니다.` : '이미 목록에 있는 영상입니다.');
+      setStatus(added ? '현재 영상 1개를 목록에 추가했어요.' : '이미 목록에 있는 영상이에요.');
       return;
     }
 
     if (u.pathname !== '/playlist') {
-      setStatus('재생목록(/playlist) 또는 영상 페이지에서 실행하세요. 아래에 URL을 직접 입력할 수도 있습니다.');
+      showError('이 페이지에서는 불러올 수 없어요', '유튜브 재생목록 페이지나 영상 페이지에서 눌러 주세요. 아래에 URL을 직접 입력할 수도 있어요.');
       return;
     }
 
-    setStatus('불러오는 중... (스크롤하며 로딩)');
+    showProgress('영상을 찾는 중이에요…');
+    await chrome.storage.local.remove('loadProgress');
     // content script 메시지 대신 함수를 직접 주입: 항상 최신 코드가 실행됨
     const [{ result: res } = {}] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractInPage });
     if (!res) throw new Error('페이지에서 응답이 없습니다.');
     if (!res.items.length) {
       const d = res.diag;
-      setStatus(`추출된 URL이 없습니다. (진단: ${d.path} / 항목 ${d.items} / 링크 ${d.links} / watch링크 ${d.watchLinks})`);
+      showError(
+        '영상을 찾지 못했어요',
+        '유튜브 재생목록 페이지가 맞는지 확인하고, 페이지를 새로고침한 뒤 다시 눌러 주세요.',
+        `진단: ${d.path} / 항목 ${d.items} / 링크 ${d.links} / watch링크 ${d.watchLinks}`
+      );
       return;
     }
     const added = addItems(res.items.map((x) => ({ key: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.title })));
-    setStatus(`${res.items.length}개 불러옴 (새로 추가 ${added}개). 보낼 항목을 고르세요.`);
+    setStatus(`${res.items.length}개를 불러왔어요 (새로 추가 ${added}개).\n보낼 항목을 고르세요.`);
   } catch (e) {
     console.error(e);
-    setStatus('오류: ' + e.message);
+    showError('문제가 생겼어요', '잠시 뒤 다시 눌러 주세요. 계속되면 유튜브 페이지를 새로고침해 보세요.', e.message);
   } finally {
     $('load').disabled = false;
+    $('loadLabel').textContent = '현재 페이지에서 불러오기';
+    chrome.storage.local.remove('loadProgress');
     render();
     persist();
   }
@@ -197,7 +277,7 @@ $('addManual').addEventListener('click', () => {
     list.push(n);
   }
   const added = addItems(list);
-  let msg = found.length ? `${list.length}개 인식, 새로 추가 ${added}개.` : 'http(s):// 로 시작하는 URL을 찾지 못했습니다.';
+  let msg = found.length ? `${list.length}개를 인식했어요 (새로 추가 ${added}개).` : 'http(s):// 로 시작하는 URL을 찾지 못했어요.';
   if (skippedPlaylist) msg += `\n재생목록 URL ${skippedPlaylist}개는 해당 재생목록 페이지에서 "불러오기"를 사용하세요.`;
   setStatus(msg);
   if (added) $('manual').value = '';
@@ -211,8 +291,16 @@ $('all').addEventListener('change', () => {
   render();
   persist();
 });
-$('clear').addEventListener('click', () => { items = []; render(); persist(); setStatus('목록을 비웠습니다.'); });
-$('limit').addEventListener('change', persist);
+$('clear').addEventListener('click', () => { items = []; render(); persist(); setStatus('목록을 비웠어요.'); });
+document.querySelectorAll('#limits button').forEach((b) => {
+  b.addEventListener('click', () => {
+    const v = Number(b.dataset.v);
+    if (!LIMITS.includes(v)) return;
+    limit = v;
+    renderLimit();
+    persist();
+  });
+});
 
 $('send').addEventListener('click', async () => {
   const chosen = items.filter((i) => i.checked).map(({ key, url, title }) => ({ key, url, title }));
@@ -220,10 +308,10 @@ $('send').addEventListener('click', async () => {
   $('send').disabled = true;
   try {
     await persist();
-    await chrome.runtime.sendMessage({ type: 'SEND_TO_NOTEBOOKLM', items: chosen, limit: Number($('limit').value) || 300 });
-    setStatus(`${chosen.length}개 전달 완료.\nNotebookLM에서 노트북을 열고 우측 하단 파란 버튼을 누르세요.`);
+    await chrome.runtime.sendMessage({ type: 'SEND_TO_NOTEBOOKLM', items: chosen, limit });
+    setStatus(`${chosen.length}개를 보냈어요.\nNotebookLM 화면의 파란 버튼을 눌러 추가하세요.`);
   } catch (e) {
-    setStatus('오류: ' + e.message);
+    showError('보내지 못했어요', '잠시 뒤 다시 눌러 주세요.', e.message);
   } finally {
     updateSummary();
   }
@@ -231,8 +319,9 @@ $('send').addEventListener('click', async () => {
 
 // ---------- 초기화 ----------
 (async () => {
-  const { popupItems = [], sourceLimit = 300 } = await chrome.storage.local.get(['popupItems', 'sourceLimit']);
+  const { popupItems = [], limitChoice } = await chrome.storage.local.get(['popupItems', 'limitChoice']);
   items = popupItems;
-  $('limit').value = sourceLimit;
+  limit = LIMITS.includes(limitChoice) ? limitChoice : DEFAULT_LIMIT;
+  renderLimit();
   render();
 })();

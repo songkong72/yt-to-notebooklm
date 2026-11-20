@@ -2,6 +2,7 @@
 const CONFIG = {
   BATCH_SIZE: 10,          // "웹사이트 및 YouTube URL" 창은 공백/줄바꿈 구분으로 여러 URL 허용 (검증됨)
   TIMEOUT_MS: 15000,
+  DEFAULT_LIMIT: 50,       // 소스 한도 기본값 (무료 50 / Plus 100 / Pro 300)
   LABELS: {
     sourcesTab: /^sources$|^소스$/i,       // 좁은 화면에서 Sources/채팅/Studio 탭 전환용
     addSource: /소스 추가|출처 추가|add sources?/i,
@@ -119,7 +120,7 @@ async function run(setStatus) {
   const nbId = notebookId();
   if (!nbId) return setStatus('노트북을 먼저 여세요 (목록 화면에서는 추가할 수 없음)');
 
-  const { pendingItems = [], addedHistory = {}, sourceLimit = 300 } =
+  const { pendingItems = [], addedHistory = {}, sourceLimit = CONFIG.DEFAULT_LIMIT } =
     await chrome.storage.local.get(['pendingItems', 'addedHistory', 'sourceLimit']);
   if (!pendingItems.length) return setStatus('추가할 항목이 없습니다.');
 
@@ -177,32 +178,65 @@ async function run(setStatus) {
   setStatus(`${total}개 추가 완료${notes.length ? ' (' + notes.join(', ') + ')' : ''}`);
 }
 
-// 화면 우측 하단 버튼
+// 화면 우측 하단 버튼 + 안내 말풍선 (위치는 예전과 같은 오른쪽 아래)
 function mountButton() {
   // 확장 새로고침/재주입으로 남은 옛 버튼 제거
+  document.getElementById('yt2nlm-wrap')?.remove();
   document.getElementById('yt2nlm-btn')?.remove();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'yt2nlm-wrap';
+  wrap.style.cssText =
+    'position:fixed;right:24px;bottom:110px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-end;gap:10px;font-family:"Noto Sans KR","Malgun Gothic",sans-serif';
+
+  // 안내 말풍선
+  const tip = document.createElement('div');
+  tip.style.cssText =
+    'position:relative;width:250px;box-sizing:border-box;padding:10px 12px;border-radius:10px;background:#1e293b;color:#fff;font-size:13px;font-weight:500;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.4);display:none';
+  const tipText = document.createElement('span');
+  const arrow = document.createElement('span');
+  arrow.style.cssText = 'position:absolute;right:36px;bottom:-6px;width:12px;height:12px;background:#1e293b;transform:rotate(45deg)';
+  tip.append(tipText, arrow);
+
   const btn = document.createElement('button');
   btn.id = 'yt2nlm-btn';
-  btn.style.cssText =
-    'position:fixed;right:24px;bottom:110px;z-index:2147483647;padding:10px 14px;border:0;border-radius:8px;background:#1a73e8;color:#fff;font:14px sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)';
-  (document.body || document.documentElement).appendChild(btn);
+  wrap.append(tip, btn);
+  (document.body || document.documentElement).appendChild(wrap);
+
+  const BASE = 'border:0;border-radius:8px;color:#fff;cursor:pointer;';
+  // ready: 보낸 영상이 있어 눈에 띄게 / busy: 작업 중·결과 표시 / idle: 대기
+  const STYLES = {
+    ready: BASE + 'padding:12px 18px;background:#1a73e8;font:600 15px "Noto Sans KR","Malgun Gothic",sans-serif;box-shadow:0 0 0 6px rgba(26,115,232,.25),0 2px 8px rgba(0,0,0,.4)',
+    busy: BASE + 'padding:10px 14px;background:#1a73e8;font:14px "Noto Sans KR","Malgun Gothic",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4)',
+    idle: BASE + 'padding:10px 14px;background:#5f6368;font:14px "Noto Sans KR","Malgun Gothic",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4)',
+  };
+  const setMode = (mode, text, tipMessage) => {
+    btn.style.cssText = STYLES[mode];
+    btn.textContent = text;
+    if (tipMessage) { tipText.textContent = tipMessage; tip.style.display = 'block'; }
+    else tip.style.display = 'none';
+  };
+
   let running = false;
-  const setStatus = (t) => { btn.textContent = t; btn.style.display = 'block'; };
+  let tipDismissed = false;
+  // run()이 쓰는 상태 표시 (작업 중/결과)
+  const setStatus = (t) => setMode('busy', t, null);
   const refresh = async () => {
     if (running) return;
     const { pendingItems = [] } = await chrome.storage.local.get('pendingItems');
     if (pendingItems.length) {
-      btn.style.background = '#1a73e8';
-      setStatus(`${pendingItems.length}개 소스로 추가`);
+      const n = pendingItems.length;
+      setMode('ready', `${n}개를 소스로 추가하기`, tipDismissed ? null : `이 버튼을 누르면 보낸 영상 ${n}개가 이 노트북의 소스로 추가돼요.`);
     } else {
       // 숨기지 않고 대기 상태를 표시 (확장이 이 페이지에 로드됐는지 바로 확인 가능)
-      btn.style.background = '#5f6368';
-      setStatus('추가할 URL 없음');
+      setMode('idle', '추가할 URL 없음', null);
     }
   };
   btn.addEventListener('click', async () => {
     if (running) return;
     running = true;
+    tipDismissed = true;
+    tip.style.display = 'none';
     try {
       await run(setStatus);
     } catch (e) {
@@ -212,7 +246,14 @@ function mountButton() {
       running = false;
     }
   });
-  chrome.storage.onChanged.addListener((changes) => { if (changes.pendingItems) refresh(); });
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.pendingItems) {
+      // 새로 보낸 항목이 들어오면 말풍선을 다시 보여줌 (남은 항목이 줄어드는 경우는 제외)
+      const added = (changes.pendingItems.newValue || []).length > (changes.pendingItems.oldValue || []).length;
+      if (added) tipDismissed = false;
+      refresh();
+    }
+  });
   refresh();
 }
 mountButton();
