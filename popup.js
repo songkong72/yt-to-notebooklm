@@ -252,8 +252,11 @@ $('load').addEventListener('click', async () => {
       );
       return;
     }
-    const added = addItems(res.items.map((x) => ({ key: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.title })));
-    setStatus(`${res.items.length}개를 불러왔어요 (새로 추가 ${added}개).\n보낼 항목을 고르세요.`);
+    // 재생목록을 새로 불러오면 이전 목록은 비우고 새 목록으로 교체 (다른 내용이 섞이지 않도록)
+    const hadItems = items.length > 0;
+    items = [];
+    addItems(res.items.map((x) => ({ key: x.id, url: 'https://www.youtube.com/watch?v=' + x.id, title: x.title })));
+    setStatus(`${res.items.length}개를 불러왔어요.${hadItems ? '\n이전 목록은 새 목록으로 바꿨어요.' : ''}\n보낼 항목을 고르세요.`);
   } catch (e) {
     console.error(e);
     showError('문제가 생겼어요', '잠시 뒤 다시 눌러 주세요. 계속되면 유튜브 페이지를 새로고침해 보세요.', e.message);
