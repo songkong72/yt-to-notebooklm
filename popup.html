@@ -1,9 +1,112 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><style>body{width:260px;font:14px sans-serif;padding:12px}button{width:100%;padding:8px}</style></head>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --blue: #2563eb; --blue-hover: #1d4ed8; --blue-soft: #eff4ff;
+    --ink: #1e293b; --sub: #64748b; --muted: #94a3b8;
+    --line: #e2e8f0; --field: #f8fafc; --field-hover: #f1f5f9;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { width: 360px; height: 580px; display: flex; flex-direction: column; margin: 0; overflow: hidden; font: 13px/1.5 "Pretendard", "Noto Sans KR", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", sans-serif; letter-spacing: -0.01em; color: var(--ink); background: #fff; }
+  button, textarea, input { font-family: inherit; }
+  header { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+  header h1 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; }
+  #hcount { color: var(--muted); font-size: 12px; }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 16px; }
+  .top { flex: none; }
+  footer { flex: none; padding: 10px 16px 14px; border-top: 1px solid var(--line); background: #fff; }
+  #status { margin: 0 0 10px; min-height: 2.9em; color: var(--sub); font-size: 12px; white-space: pre-wrap; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  button:disabled { opacity: .45; cursor: default; }
+  button svg { flex: none; }
+
+  #load { width: 100%; background: var(--blue); color: #fff; font-weight: 600; padding: 12px; font-size: 14px; }
+  #load:hover:not(:disabled) { background: var(--blue-hover); }
+
+  hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+
+  .field-label { margin: 0 0 6px; font-weight: 600; font-size: 13px; }
+  .field-label span { margin-left: 4px; color: var(--muted); font-weight: 400; font-size: 12px; }
+  textarea { width: 100%; height: 56px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); color: var(--ink); font-size: 13px; line-height: 1.5; resize: vertical; }
+  textarea::placeholder { color: var(--muted); }
+  textarea:focus { outline: none; border-color: var(--blue); background: #fff; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+
+  #addManual { width: 100%; margin-top: 10px; background: var(--field); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+  #addManual:hover { background: var(--field-hover); }
+
+  .bar { flex: none; display: flex; align-items: center; gap: 8px; margin: 12px 0 6px; color: var(--sub); font-size: 12px; }
+  .bar label { display: flex; align-items: center; gap: 6px; flex: 1; cursor: pointer; }
+  #clear { padding: 3px 10px; border-radius: 8px; background: var(--field); color: var(--sub); border: 1px solid var(--line); font-size: 12px; }
+  #clear:hover { background: var(--field-hover); }
+  input[type=checkbox] { accent-color: var(--blue); width: 14px; height: 14px; margin: 0; flex: none; }
+
+  #list { flex: 1; min-height: 70px; overflow-y: auto; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 10px; }
+  #list label { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
+  #list label:last-child { border-bottom: 0; }
+  #list label:hover { background: var(--field); }
+  #list .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #empty { padding: 16px 8px; text-align: center; color: var(--muted); }
+
+  .limit { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+  .limit span:last-child { flex: 1; }
+  input[type=number] { width: 64px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--field); color: var(--ink); }
+  input[type=number]:focus { outline: none; border-color: var(--blue); }
+
+  #send { width: 100%; background: var(--blue); color: #fff; font-weight: 600; padding: 12px; font-size: 14px; }
+  #send:hover:not(:disabled) { background: var(--blue-hover); }
+</style>
+</head>
 <body>
-  <p id="status">재생목록 페이지에서 실행하세요.</p>
-  <button id="extract">URL 추출 → NotebookLM</button>
+  <header>
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff2d55"/><stop offset=".5" stop-color="#9646f0"/><stop offset="1" stop-color="#286eff"/></linearGradient></defs>
+      <rect width="24" height="24" rx="6" fill="url(#g)"/>
+      <path d="M8.5 6.5l8 5-8 5z" fill="#fff"/>
+      <circle cx="17.5" cy="17.5" r="4.2" fill="#ffcc00"/>
+      <path d="M17.5 15.4v4.2M15.4 17.5h4.2" stroke="#282838" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+    <h1>YouTube → NotebookLM</h1>
+    <span id="hcount">0개</span>
+  </header>
+  <main>
+    <div class="top">
+    <p id="status">재생목록/영상 페이지에서 "불러오기"를 누르거나, URL을 직접 입력하세요.</p>
+
+    <button id="load">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>
+      현재 페이지에서 불러오기
+    </button>
+
+    <hr>
+
+    <p class="field-label">URL 직접 입력<span>(여러 줄 / 공백 구분)</span></p>
+    <textarea id="manual" placeholder="YouTube 영상 · shorts · youtu.be 및 일반 웹페이지"></textarea>
+    <button id="addManual">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      입력한 URL을 목록에 추가
+    </button>
+
+    </div>
+
+    <div class="bar">
+      <label><input type="checkbox" id="all" checked> 전체 선택</label>
+      <span id="count">0 / 0</span>
+      <button id="clear">비우기</button>
+    </div>
+    <div id="list"><div id="empty">목록이 비어 있습니다.</div></div>
+
+  </main>
+  <footer>
+    <div class="limit">
+      <span>소스 한도</span>
+      <input type="number" id="limit" min="1" max="1000" value="300">
+      <span>무료 50 · Pro 300</span>
+    </div>
+    <button id="send" disabled>선택한 항목 NotebookLM으로 보내기</button>
+  </footer>
   <script src="popup.js"></script>
 </body>
 </html>

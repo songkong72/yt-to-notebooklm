@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Playlist → NotebookLM",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "유튜브 재생목록의 영상 URL을 추출해 NotebookLM에 소스로 일괄 추가합니다.",
   "permissions": [
     "activeTab",
@@ -16,20 +16,18 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "NotebookLM으로 보내기"
+    "default_title": "NotebookLM으로 보내기",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
-    {
-      "matches": [
-        "https://www.youtube.com/*"
-      ],
-      "js": [
-        "content-youtube.js"
-      ]
-    },
     {
       "matches": [
         "https://notebooklm.google.com/*",
@@ -39,5 +37,11 @@
         "content-notebooklm.js"
       ]
     }
-  ]
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }

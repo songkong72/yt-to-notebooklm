@@ -1,8 +1,8 @@
-// 추출된 URL을 저장하고 NotebookLM 탭을 열거나 찾아서 포커스한다.
+// 선택된 항목을 저장하고 NotebookLM 탭을 열거나 찾아서 포커스한다.
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type !== 'SEND_TO_NOTEBOOKLM') return;
   (async () => {
-    await chrome.storage.local.set({ pendingUrls: msg.urls });
+    await chrome.storage.local.set({ pendingItems: msg.items, sourceLimit: msg.limit });
     // NotebookLM이 notebook.google.com(Gemini Notebook)으로 이전/리다이렉트되는 경우도 대응
     const tabs = await chrome.tabs.query({
       url: ['https://notebooklm.google.com/*', 'https://notebook.google.com/*'],
@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((msg) => {
       await chrome.tabs.update(tabs[0].id, { active: true });
       await chrome.windows.update(tabs[0].windowId, { focused: true });
     } else {
-      await chrome.tabs.create({ url: 'https://notebooklm.google.com/' });
+      await chrome.tabs.create({ url: 'https://notebook.google.com/' });
     }
   })();
 });

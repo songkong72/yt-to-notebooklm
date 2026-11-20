@@ -99,34 +99,90 @@ async function addBatch(urls, log) {
   log(`${urls.length}개 추가 요청 완료`);
 }
 
+// ---------- 중복/한도 처리 ----------
+const normTitle = (s) => (s || '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+const notebookId = () => (location.pathname.match(/\/notebook\/([^/?#]+)/) || [])[1] || null;
+
+// 노트북에 이미 있는 소스 제목 (".single-source-container .source-title"; Gemini 채팅 그룹 행은 .source-title이 없어 제외됨)
+async function readExistingSources() {
+  const read = () => [...document.querySelectorAll('.single-source-container .source-title')].map((e) => e.textContent);
+  let titles = read();
+  if (!titles.length) {
+    // 좁은 화면에서는 Sources 탭을 눌러야 목록이 렌더링됨
+    const tab = findClickable(CONFIG.LABELS.sourcesTab);
+    if (tab) { tab.click(); await sleep(1200); titles = read(); }
+  }
+  return titles;
+}
+
 async function run(setStatus) {
-  const { pendingUrls = [] } = await chrome.storage.local.get('pendingUrls');
-  if (!pendingUrls.length) return setStatus('추가할 URL이 없습니다.');
-  const total = pendingUrls.length;
-  let remaining = pendingUrls.slice();
+  const nbId = notebookId();
+  if (!nbId) return setStatus('노트북을 먼저 여세요 (목록 화면에서는 추가할 수 없음)');
+
+  const { pendingItems = [], addedHistory = {}, sourceLimit = 300 } =
+    await chrome.storage.local.get(['pendingItems', 'addedHistory', 'sourceLimit']);
+  if (!pendingItems.length) return setStatus('추가할 항목이 없습니다.');
+
+  // 1) 중복 제외: 이 노트북에 확장으로 추가한 이력(key) + 화면의 기존 소스 제목
+  const history = new Set(addedHistory[nbId] || []);
+  const existingTitles = await readExistingSources();
+  const existingSet = new Set(existingTitles.map(normTitle));
+  const fresh = [];
+  let dup = 0;
+  for (const it of pendingItems) {
+    const titleKnown = it.title && it.title !== it.url;
+    if (history.has(it.key) || (titleKnown && existingSet.has(normTitle(it.title)))) dup++;
+    else fresh.push(it);
+  }
+
+  // 2) 소스 한도: 현재 소스 수(화면 우선, 없으면 이력) + 추가분 <= 한도
+  const existingCount = existingTitles.length || history.size;
+  const room = Math.max(0, sourceLimit - existingCount);
+  const queue = fresh.slice(0, room);
+  const overflow = fresh.slice(room);
+  const notes = [];
+  if (dup) notes.push(`중복 ${dup}개 제외`);
+  if (overflow.length) notes.push(`한도(${sourceLimit}) 초과로 ${overflow.length}개 보류`);
+
+  if (!queue.length) {
+    await chrome.storage.local.set({ pendingItems: overflow });
+    return setStatus(`추가할 새 항목 없음${notes.length ? ' (' + notes.join(', ') + ')' : ''}`);
+  }
+
+  const total = queue.length;
+  let remaining = queue.slice();
+  const flushPending = (rest) =>
+    rest.length || overflow.length
+      ? chrome.storage.local.set({ pendingItems: [...rest, ...overflow] })
+      : chrome.storage.local.remove('pendingItems');
+  await flushPending(remaining);
+
   while (remaining.length) {
     const batch = remaining.slice(0, CONFIG.BATCH_SIZE);
-    setStatus(`${total - remaining.length + batch.length} / ${total} 처리 중...`);
+    setStatus(`${total - remaining.length + batch.length} / ${total} 처리 중...${notes.length ? ' (' + notes.join(', ') + ')' : ''}`);
     try {
-      await addBatch(batch, console.log);
+      await addBatch(batch.map((b) => b.url), console.log);
     } catch (e) {
       console.error('[yt-to-notebooklm]', e);
-      // 실패한 배치 + 아직 시도 안 한 나머지를 모두 보존
-      await chrome.storage.local.set({ pendingUrls: remaining });
-      setStatus(`오류: ${e.message} (남은 ${remaining.length}개, 클릭하여 재시도)`);
-      return;
+      await flushPending(remaining); // 실패한 배치 + 시도 안 한 나머지 보존
+      return setStatus(`오류: ${e.message} (남은 ${remaining.length + overflow.length}개, 클릭하여 재시도)`);
     }
+    // 성공분: 이력에 기록하고 대기열에서 제거 (중단/재시도 시 중복 방지)
+    batch.forEach((b) => history.add(b.key));
+    addedHistory[nbId] = [...history];
+    await chrome.storage.local.set({ addedHistory });
     remaining = remaining.slice(batch.length);
-    // 성공분은 즉시 저장소에서 제거 (중간에 중단돼도 중복 추가 방지)
-    if (remaining.length) await chrome.storage.local.set({ pendingUrls: remaining });
+    await flushPending(remaining);
   }
-  await chrome.storage.local.remove('pendingUrls');
-  setStatus('모두 추가 완료');
+  setStatus(`${total}개 추가 완료${notes.length ? ' (' + notes.join(', ') + ')' : ''}`);
 }
 
 // 화면 우측 하단 버튼
 function mountButton() {
+  // 확장 새로고침/재주입으로 남은 옛 버튼 제거
+  document.getElementById('yt2nlm-btn')?.remove();
   const btn = document.createElement('button');
+  btn.id = 'yt2nlm-btn';
   btn.style.cssText =
     'position:fixed;right:24px;bottom:110px;z-index:2147483647;padding:10px 14px;border:0;border-radius:8px;background:#1a73e8;color:#fff;font:14px sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)';
   (document.body || document.documentElement).appendChild(btn);
@@ -134,14 +190,14 @@ function mountButton() {
   const setStatus = (t) => { btn.textContent = t; btn.style.display = 'block'; };
   const refresh = async () => {
     if (running) return;
-    const { pendingUrls = [] } = await chrome.storage.local.get('pendingUrls');
-    if (pendingUrls.length) {
+    const { pendingItems = [] } = await chrome.storage.local.get('pendingItems');
+    if (pendingItems.length) {
       btn.style.background = '#1a73e8';
-      setStatus(`YouTube ${pendingUrls.length}개 소스로 추가`);
+      setStatus(`${pendingItems.length}개 소스로 추가`);
     } else {
       // 숨기지 않고 대기 상태를 표시 (확장이 이 페이지에 로드됐는지 바로 확인 가능)
       btn.style.background = '#5f6368';
-      setStatus('추가할 YouTube URL 없음');
+      setStatus('추가할 URL 없음');
     }
   };
   btn.addEventListener('click', async () => {
@@ -156,7 +212,7 @@ function mountButton() {
       running = false;
     }
   });
-  chrome.storage.onChanged.addListener(refresh);
+  chrome.storage.onChanged.addListener((changes) => { if (changes.pendingItems) refresh(); });
   refresh();
 }
 mountButton();
